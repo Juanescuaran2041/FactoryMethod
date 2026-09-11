@@ -12,11 +12,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Template Method: defines the fixed skeleton every document processor follows
- * (guard checks, common metadata, then type-specific extraction) while letting each
- * concrete subclass fill in {@link #extractTypeSpecificMetadata(Document)}.
- */
+
 public abstract class AbstractDocumentProcessor implements DocumentProcessor {
 
     @Override
