@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GlobalDocs Solutions | Document Processing System</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-mark">GD</span>
+        <div>
+            <h1>GlobalDocs Solutions</h1>
+            <p>Special Document Processing System &mdash; Factory Method architecture</p>
+        </div>
+    </div>
+    <div class="topbar-meta">
+        <span id="server-status" class="status-pill status-pill--pending">Connecting to backend&hellip;</span>
+    </div>
+</header>
+
+<main class="layout">
+    <nav class="tabs" role="tablist">
+        <button class="tab-btn active" data-tab="single" role="tab" aria-selected="true">Single Document</button>
+        <button class="tab-btn" data-tab="batch" role="tab" aria-selected="false">Batch Processing</button>
+        <button class="tab-btn" data-tab="about" role="tab" aria-selected="false">About the System</button>
+    </nav>
+
+    <!-- SINGLE DOCUMENT -->
+    <section id="tab-single" class="tab-panel active">
+        <div class="grid">
+            <form id="single-form" class="card form-card" novalidate>
+                <h2>Process a document</h2>
+                <p class="hint">The file is sent as-is to the Java backend. Unsupported formats
+                    (videos, images, audio, etc.) are only rejected once the server validates them &mdash;
+                    nothing is filtered on the client.</p>
+
+                <label class="field">
+                    <span>Destination country</span>
+                    <select name="countryCode" id="single-country" required></select>
+                </label>
+
+                <label class="field">
+                    <span>Document type</span>
+                    <select name="documentType" id="single-doctype" required></select>
+                    <small id="single-doctype-hint" class="field-hint"></small>
+                </label>
+
+                <label class="field">
+                    <span>Tax / fiscal ID <em>(optional)</em></span>
+                    <input type="text" name="taxId" id="single-taxid" placeholder="e.g. 900123456-7">
+                    <small id="single-taxid-hint" class="field-hint"></small>
+                </label>
+
+                <label class="field">
+                    <span>File</span>
+                    <input type="file" name="file" id="single-file" required>
+                    <small class="field-hint">Any file can be selected &mdash; the backend decides whether the format is supported.</small>
+                </label>
+
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-label">Process document</span>
+                    <span class="spinner" hidden></span>
+                </button>
+            </form>
+
+            <div class="card result-card">
+                <h2>Result</h2>
+                <div id="single-result" class="result-empty">No document processed yet.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- BATCH -->
+    <section id="tab-batch" class="tab-panel">
+        <div class="grid">
+            <form id="batch-form" class="card form-card" novalidate>
+                <h2>Process a batch</h2>
+                <p class="hint">GlobalDocs handles 50,000+ documents a day. Add as many files as you
+                    need &mdash; each one is validated and processed independently, so a single
+                    rejected file never stops the rest of the batch.</p>
+
+                <label class="field">
+                    <span>Destination country (applies to the whole batch)</span>
+                    <select name="countryCode" id="batch-country" required></select>
+                </label>
+
+                <label class="field">
+                    <span>Tax / fiscal ID <em>(optional, applies to the whole batch)</em></span>
+                    <input type="text" name="taxId" id="batch-taxid" placeholder="e.g. 900123456-7">
+                </label>
+
+                <div id="batch-rows" class="batch-rows"></div>
+
+                <button type="button" id="batch-add-row" class="btn btn-secondary">+ Add file</button>
+                <button type="submit" class="btn btn-primary">
+                    <span class="btn-label">Process batch</span>
+                    <span class="spinner" hidden></span>
+                </button>
+            </form>
+
+            <div class="card result-card">
+                <h2>Batch result</h2>
+                <div id="batch-summary" class="batch-summary" hidden></div>
+                <div id="batch-result" class="result-empty">No batch processed yet.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="tab-about" class="tab-panel">
+        <div class="card">
+            <h2>How this system is built</h2>
+            <ul class="pattern-list">
+                <li><strong>Factory Method</strong> &mdash; <code>DocumentProcessorFactory</code> declares the
+                    factory method that each of the five concrete factories overrides to create the
+                    right <code>DocumentProcessor</code> for its document type.</li>
+                <li><strong>Abstract Factory</strong> &mdash; <code>CountryComplianceFactory</code> creates a
+                    matching family of country-specific objects (a tax id validator and a document-rules
+                    object) so the two never get mismatched between countries.</li>
+                <li><strong>Singleton</strong> &mdash; <code>DocumentProcessorFactoryProvider</code> and
+                    <code>CountryComplianceRegistry</code> are the single, shared access points to those
+                    factories for the whole application.</li>
+                <li><strong>Template Method</strong> &mdash; <code>AbstractDocumentProcessor</code> fixes the
+                    common processing steps (empty-file guard, checksum, common metadata) and leaves the
+                    type-specific extraction to each subclass.</li>
+            </ul>
+            <p class="hint">Countries currently supported: Colombia, Mexico, Brazil, Spain and the United
+                States &mdash; each with its own accepted document types, maximum file size and fiscal id
+                format, enforced entirely on the backend.</p>
+        </div>
+    </section>
+</main>
+
+<footer class="footer">GlobalDocs Solutions &middot; Document Processing System &middot; Java backend, zero external dependencies</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
