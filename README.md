@@ -1,287 +1,68 @@
 # GlobalDocs Solutions — Patrones de Diseño
 
-Este proyecto es el backend (y su cliente web) del **Sistema de Procesamiento de Documentos Especiales**
-de GlobalDocs Solutions: una compañía multinacional que procesa más de 50.000 documentos diarios
-(facturas electrónicas, contratos legales, reportes financieros, certificados digitales y
-declaraciones tributarias), donde **cada país tiene sus propias reglas** sobre qué documentos acepta,
-qué tamaño permite y cómo valida el identificador fiscal del emisor.
+Este proyecto es el Sistema de Procesamiento de Documentos Especiales de GlobalDocs Solutions,
+una compañía multinacional que procesa más de 50.000 documentos diarios (facturas electrónicas,
+contratos legales, reportes financieros, certificados digitales y declaraciones tributarias),
+donde cada país tiene sus propias reglas sobre qué documentos acepta, qué tamaño permite y cómo
+valida el identificador fiscal del emisor. A continuación se explican los tres patrones
+creacionales que sostienen la arquitectura del backend.
 
-Ese problema — variedad de tipos de documento, variedad de países, y la necesidad de que todo el
-sistema siga siendo coherente y fácil de extender — es exactamente el terreno donde los patrones
-de diseño dejan de ser teoría y se vuelven necesarios. Este README explica, con el código real del
-proyecto, los **tres patrones creacionales** que sostienen la arquitectura:
+## Factory Method
 
-| Patrón | Pregunta que responde en este proyecto |
-|---|---|
-| **Factory Method** | ¿Qué objeto `DocumentProcessor` debo crear para *este* tipo de documento? |
-| **Abstract Factory** | ¿Qué *familia completa* de reglas de cumplimiento corresponde a *este* país? |
-| **Singleton** | ¿Cómo evito crear estas fábricas una y otra vez, y garantizo que toda la app use las mismas? |
+Existen cinco tipos de documento y cada uno necesita una lógica de procesamiento distinta: una
+factura electrónica extrae su número y lo encola para reportarlo a la autoridad tributaria, un
+certificado digital verifica su integridad, una declaración tributaria registra el identificador
+fiscal del declarante, y así con cada tipo. En vez de tener un único método con un gran `switch`
+que decida qué hacer según el tipo de documento —algo difícil de mantener y fácil de romper cada
+vez que se agrega un tipo nuevo—, el proyecto define una clase creadora abstracta
+(`DocumentProcessorFactory`) que declara el método fábrica `createProcessor()`, y una subclase
+concreta por cada tipo de documento (`ElectronicInvoiceProcessorFactory`,
+`LegalContractProcessorFactory`, `FinancialReportProcessorFactory`,
+`DigitalCertificateProcessorFactory`, `TaxReturnProcessorFactory`) que decide qué procesador
+concreto crear. El resto del sistema nunca instancia un procesador directamente ni pregunta qué
+tipo de documento es: simplemente pide la fábrica correspondiente y le delega el trabajo. Esto
+permite que GlobalDocs agregue un sexto tipo de documento en el futuro sin modificar ninguna clase
+existente, solo agregando una fábrica y un procesador nuevos.
 
----
+## Abstract Factory
 
-## 1. Factory Method
+La variación por país es distinta a la variación por tipo de documento: no es "un objeto
+distinto", sino un conjunto de reglas que deben ser coherentes entre sí. Cada país necesita, a la
+vez, un validador de identificación fiscal con el formato correcto (NIT en Colombia, RFC en
+México, CNPJ en Brasil, NIF en España, EIN en Estados Unidos) y un conjunto de reglas de documento
+que indique qué tipos acepta ese país y cuál es el tamaño máximo permitido. Si estos dos objetos se
+construyeran por separado, sería posible —por un simple error de programación— validar el
+identificador fiscal de un país contra las reglas de documento de otro, algo inaceptable en un
+sistema de cumplimiento normativo multinacional. Por eso el proyecto usa una fábrica abstracta
+(`CountryComplianceFactory`) que crea toda la familia de productos relacionados de un mismo país
+—el validador de identificación fiscal y las reglas de documento— y una implementación concreta
+por país (`ColombiaComplianceFactory`, `MexicoComplianceFactory`, `BrazilComplianceFactory`,
+`SpainComplianceFactory`, `UnitedStatesComplianceFactory`) que garantiza que ambos productos
+siempre viajan juntos y nunca se mezclan entre países.
 
-### El problema
+## Singleton
 
-Existen cinco tipos de documento (`ELECTRONIC_INVOICE`, `LEGAL_CONTRACT`, `FINANCIAL_REPORT`,
-`DIGITAL_CERTIFICATE`, `TAX_RETURN`) y cada uno necesita una lógica de procesamiento distinta:
-una factura extrae número de documento y lo encola para reportar a la autoridad tributaria, un
-certificado digital verifica su integridad, una declaración tributaria registra el ID fiscal del
-declarante, etc.
+Las fábricas anteriores no tienen estado propio que cambie con cada solicitud: registrar qué
+fábrica atiende qué tipo de documento, o qué fábrica atiende qué país, es un trabajo que debe
+hacerse una sola vez, no en cada documento que se sube. Con miles de documentos procesándose por
+minuto, crear e indexar estas fábricas en cada solicitud sería trabajo repetido e innecesario, y
+además abriría la puerta a que distintas partes del sistema usaran registros inconsistentes de las
+mismas fábricas. Por eso ambos registros —`DocumentProcessorFactoryProvider`, que resuelve la
+fábrica de procesamiento según el tipo de documento, y `CountryComplianceRegistry`, que resuelve
+la fábrica de cumplimiento según el país— se implementan como Singleton: su constructor es
+privado, se construyen una sola vez con todas las fábricas ya registradas, y toda la aplicación
+accede a la misma instancia a través de un único método `getInstance()`. Esto garantiza que
+cualquier solicitud, sea de un documento individual o de un lote de miles, consulte siempre el
+mismo estado compartido en memoria.
 
-La tentación fácil sería un único método gigante con un `switch` sobre el tipo de documento. El
-problema es que cada vez que GlobalDocs quisiera soportar un nuevo tipo de documento (algo que
-*va a pasar*, porque el negocio crece), habría que tocar ese método central y arriesgar romper la
-lógica de los demás tipos.
+## Cómo se complementan
 
-### La solución: Factory Method
-
-En vez de decidir *dentro* de una función qué procesador usar, se define una clase creadora
-abstracta que declara el **método fábrica**, y cada tipo de documento tiene su propia subclase que
-lo implementa:
-
-```java
-// factory/DocumentProcessorFactory.java
-public abstract class DocumentProcessorFactory {
-
-    public final ProcessingResult handle(Document document) throws DocumentProcessingException {
-        DocumentProcessor processor = createProcessor();   // <- el método fábrica
-        return processor.process(document);
-    }
-
-    protected abstract DocumentProcessor createProcessor(); // cada subclase decide QUÉ crear
-    public abstract DocumentType getSupportedType();
-}
-```
-
-```java
-// factory/ElectronicInvoiceProcessorFactory.java
-public final class ElectronicInvoiceProcessorFactory extends DocumentProcessorFactory {
-    @Override
-    protected DocumentProcessor createProcessor() {
-        return new ElectronicInvoiceProcessor();
-    }
-    @Override
-    public DocumentType getSupportedType() {
-        return DocumentType.ELECTRONIC_INVOICE;
-    }
-}
-```
-
-```mermaid
-classDiagram
-    class DocumentProcessorFactory {
-        <<abstract>>
-        +handle(Document) ProcessingResult
-        #createProcessor()* DocumentProcessor
-    }
-    class ElectronicInvoiceProcessorFactory
-    class LegalContractProcessorFactory
-    class FinancialReportProcessorFactory
-    class DigitalCertificateProcessorFactory
-    class TaxReturnProcessorFactory
-
-    class DocumentProcessor {
-        <<interface>>
-        +process(Document) ProcessingResult
-    }
-    class AbstractDocumentProcessor {
-        <<abstract>>
-    }
-    class ElectronicInvoiceProcessor
-
-    DocumentProcessorFactory <|-- ElectronicInvoiceProcessorFactory
-    DocumentProcessorFactory <|-- LegalContractProcessorFactory
-    DocumentProcessorFactory <|-- FinancialReportProcessorFactory
-    DocumentProcessorFactory <|-- DigitalCertificateProcessorFactory
-    DocumentProcessorFactory <|-- TaxReturnProcessorFactory
-
-    DocumentProcessor <|.. AbstractDocumentProcessor
-    AbstractDocumentProcessor <|-- ElectronicInvoiceProcessor
-    ElectronicInvoiceProcessorFactory ..> ElectronicInvoiceProcessor : crea
-```
-
-### Por qué funciona
-
-El resto del sistema (`service.DocumentProcessingService`) nunca hace `new ElectronicInvoiceProcessor()`
-directamente ni pregunta "¿qué tipo es este documento?" con un `if/else`. Simplemente pide la
-fábrica correcta y le dice `handle(document)`. Si mañana GlobalDocs agrega un sexto tipo de
-documento, se crea una fábrica y un procesador nuevos — **ninguna clase existente se modifica**.
-
----
-
-## 2. Abstract Factory
-
-### El problema
-
-La variación por país es distinta a la variación por tipo de documento: no es "un objeto distinto",
-es **un conjunto de reglas que deben ser coherentes entre sí**. Cada país necesita, a la vez:
-
-1. Un **validador de identificación fiscal** con el formato correcto (NIT en Colombia, RFC en
-   México, CNPJ en Brasil, NIF en España, EIN en Estados Unidos).
-2. Un **conjunto de reglas de documento** (qué tipos acepta ese país y el tamaño máximo permitido).
-
-Si estos dos objetos se construyeran por separado (por ejemplo, con dos fábricas simples
-independientes), sería posible — por un error de programación — validar el ID fiscal de Brasil
-contra las reglas de documento de España. En un sistema de cumplimiento normativo multinacional,
-esa mezcla es exactamente el tipo de bug que no se puede permitir.
-
-### La solución: Abstract Factory
-
-Se define una fábrica abstracta que crea **toda la familia de productos relacionados** de un
-mismo país, y una implementación concreta por país que garantiza que ambos productos siempre
-viajan juntos:
-
-```java
-// country/CountryComplianceFactory.java
-public abstract class CountryComplianceFactory {
-    public abstract CountryCode getCountryCode();
-    public abstract TaxIdValidator createTaxIdValidator();
-    public abstract CountryDocumentRules createDocumentRules();
-}
-```
-
-```java
-// country/ColombiaComplianceFactory.java
-public final class ColombiaComplianceFactory extends CountryComplianceFactory {
-    @Override
-    public TaxIdValidator createTaxIdValidator() {
-        return new RegexTaxIdValidator("\\d{9,10}(-\\d)?", "NIT colombiano: 9-10 dígitos...");
-    }
-    @Override
-    public CountryDocumentRules createDocumentRules() {
-        return new StandardCountryDocumentRules(EnumSet.allOf(DocumentType.class), 10L * 1024 * 1024);
-    }
-}
-```
-
-```mermaid
-classDiagram
-    class CountryComplianceFactory {
-        <<abstract>>
-        +createTaxIdValidator()* TaxIdValidator
-        +createDocumentRules()* CountryDocumentRules
-    }
-    class ColombiaComplianceFactory
-    class MexicoComplianceFactory
-    class BrazilComplianceFactory
-    class SpainComplianceFactory
-    class UnitedStatesComplianceFactory
-
-    class TaxIdValidator {
-        <<interface>>
-        +isValid(String) bool
-    }
-    class CountryDocumentRules {
-        <<interface>>
-        +isDocumentTypeSupported(DocumentType) bool
-        +getMaxFileSizeBytes() long
-    }
-
-    CountryComplianceFactory <|-- ColombiaComplianceFactory
-    CountryComplianceFactory <|-- MexicoComplianceFactory
-    CountryComplianceFactory <|-- BrazilComplianceFactory
-    CountryComplianceFactory <|-- SpainComplianceFactory
-    CountryComplianceFactory <|-- UnitedStatesComplianceFactory
-    CountryComplianceFactory ..> TaxIdValidator : crea
-    CountryComplianceFactory ..> CountryDocumentRules : crea
-```
-
-### Por qué funciona
-
-`DocumentValidationService` solo conoce el `CountryCode`; le pide **una** fábrica y de ahí saca
-**ambos** productos, ya coherentes entre sí. Es la diferencia entre Factory Method (crea *un*
-producto, varía por tipo de documento) y Abstract Factory (crea *una familia* de productos, varía
-por país) — en este proyecto conviven porque resuelven dos ejes de variación distintos y
-ortogonales: **tipo de documento** vs. **país**.
-
----
-
-## 3. Singleton
-
-### El problema
-
-Las fábricas anteriores (las 5 de `factory/` y las 5 de `country/`) no tienen estado propio que
-cambie por petición: registrar "qué fábrica atiende qué tipo de documento" o "qué fábrica atiende
-qué país" es trabajo que debería hacerse **una sola vez**, no en cada subida de archivo. Con miles
-de documentos procesándose por minuto, crear e indexar estas fábricas en cada request sería
-trabajo repetido e innecesario, y además abriría la puerta a que dos partes del sistema usaran
-registros distintos (e inconsistentes) de las mismas fábricas.
-
-### La solución: Singleton
-
-Ambos registros se implementan como instancia única, construida una sola vez y compartida por
-toda la aplicación:
-
-```java
-// factory/DocumentProcessorFactoryProvider.java
-public final class DocumentProcessorFactoryProvider {
-
-    private static final DocumentProcessorFactoryProvider INSTANCE = new DocumentProcessorFactoryProvider();
-
-    private final Map<DocumentType, DocumentProcessorFactory> factories = new EnumMap<>(DocumentType.class);
-
-    private DocumentProcessorFactoryProvider() {   // constructor privado: nadie más puede instanciarla
-        register(new ElectronicInvoiceProcessorFactory());
-        register(new LegalContractProcessorFactory());
-        register(new FinancialReportProcessorFactory());
-        register(new DigitalCertificateProcessorFactory());
-        register(new TaxReturnProcessorFactory());
-    }
-
-    public static DocumentProcessorFactoryProvider getInstance() {
-        return INSTANCE;
-    }
-
-    public DocumentProcessorFactory getFactory(DocumentType type) throws UnsupportedDocumentTypeException {
-        // busca en el mapa ya construido
-    }
-}
-```
-
-El mismo mecanismo aplica en `country/CountryComplianceRegistry`, que centraliza el acceso a las
-cinco `CountryComplianceFactory` (una por país).
-
-```mermaid
-classDiagram
-    class DocumentProcessorFactoryProvider {
-        -INSTANCE$ DocumentProcessorFactoryProvider
-        -DocumentProcessorFactoryProvider()
-        +getInstance()$ DocumentProcessorFactoryProvider
-        +getFactory(DocumentType) DocumentProcessorFactory
-    }
-    class CountryComplianceRegistry {
-        -INSTANCE$ CountryComplianceRegistry
-        -CountryComplianceRegistry()
-        +getInstance()$ CountryComplianceRegistry
-        +getFactory(CountryCode) CountryComplianceFactory
-    }
-    note for DocumentProcessorFactoryProvider "constructor privado +\ninstancia estática final:\nse crea una sola vez"
-```
-
-### Por qué funciona
-
-`getInstance()` es el único punto de entrada; el constructor es privado, así que es imposible
-crear una segunda copia del registro por accidente. Toda petición HTTP — sea de un documento
-individual o de un lote de miles — consulta exactamente el mismo objeto en memoria, con las
-fábricas ya registradas desde el arranque del servidor.
-
----
-
-## Cómo se complementan los tres patrones
-
-```mermaid
-flowchart LR
-    A["Documento subido\n(archivo + tipo + país)"] --> B["CountryComplianceRegistry\n(Singleton)"]
-    B --> C["CountryComplianceFactory\n(Abstract Factory)"]
-    C --> D["TaxIdValidator +\nCountryDocumentRules"]
-    D -->|documento válido| E["DocumentProcessorFactoryProvider\n(Singleton)"]
-    E --> F["DocumentProcessorFactory\n(Factory Method)"]
-    F --> G["DocumentProcessor concreto\nprocesa el documento"]
-```
-
-En una sola petición, el **Singleton** decide *dónde* buscar, la **Abstract Factory** decide *qué
-familia de reglas de país* aplicar, y el **Factory Method** decide *qué procesador de tipo de
-documento* ejecutar. Cada patrón resuelve una responsabilidad distinta, y juntos evitan que el
-sistema termine lleno de `if/else` y `new` esparcidos que serían imposibles de mantener con 50.000
-documentos diarios y regulaciones que cambian por país.
+En una sola solicitud de procesamiento, primero el Singleton `CountryComplianceRegistry` ubica la
+Abstract Factory del país correspondiente, que entrega el validador de identificación fiscal y las
+reglas de documento de ese país; si el documento pasa esa validación, el Singleton
+`DocumentProcessorFactoryProvider` ubica el Factory Method del tipo de documento correspondiente,
+que finalmente crea el procesador y ejecuta el procesamiento real. Cada patrón resuelve una
+responsabilidad distinta —dónde buscar, qué familia de reglas de país aplicar, y qué procesador de
+tipo de documento ejecutar— y juntos evitan que el sistema termine lleno de condicionales y
+creación de objetos dispersos, algo insostenible con 50.000 documentos diarios y regulaciones que
+cambian por país.
